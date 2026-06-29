@@ -380,6 +380,36 @@ const ACTIVITIES_DATA = [{"clave": 1078, "descripcion": "ACARREO DE AROS Y AGRIB
 
 </script>
 <script>
+// ===================== ALMACENAMIENTO LOCAL (localStorage) =====================
+// Wrapper con la misma interfaz que window.storage de Claude,
+// pero usando localStorage del navegador para que los datos persistan
+// en GitHub Pages y no se pierdan al actualizar el archivo.
+const appStorage = {
+  get: async (key) => {
+    const val = localStorage.getItem('cactus:'+key);
+    if(val === null) throw new Error('not found');
+    return { key, value: val };
+  },
+  set: async (key, value) => {
+    localStorage.setItem('cactus:'+key, value);
+    return { key, value };
+  },
+  delete: async (key) => {
+    localStorage.removeItem('cactus:'+key);
+    return { key, deleted: true };
+  },
+  list: async (prefix) => {
+    const keys = [];
+    for(let i=0; i<localStorage.length; i++){
+      const k = localStorage.key(i);
+      if(k && k.startsWith('cactus:'+(prefix||''))){
+        keys.push(k.replace('cactus:',''));
+      }
+    }
+    return { keys };
+  }
+};
+
 // ===================== UTILIDADES BASE =====================
 const todayKey = () => {
   const d = new Date();
@@ -436,20 +466,20 @@ let personasNuevas = {}; // credencial(str) -> {credencial,nombre,apellido_mater
 let responsableActual = null; // {credencial, nombre} - ultimo supervisor de riego escaneado en la sesion
 
 async function cargarTodo(){
-  try{ const r = await window.storage.get('registros:'+todayKey()); registrosHoy = r ? JSON.parse(r.value) : []; }catch(e){ registrosHoy = []; }
-  try{ const r = await window.storage.get('people_overrides'); peopleOverrides = r ? JSON.parse(r.value) : {}; }catch(e){ peopleOverrides = {}; }
-  try{ const r = await window.storage.get('personas_nuevas'); personasNuevas = r ? JSON.parse(r.value) : {}; }catch(e){ personasNuevas = {}; }
+  try{ const r = await appStorage.get('registros:'+todayKey()); registrosHoy = r ? JSON.parse(r.value) : []; }catch(e){ registrosHoy = []; }
+  try{ const r = await appStorage.get('people_overrides'); peopleOverrides = r ? JSON.parse(r.value) : {}; }catch(e){ peopleOverrides = {}; }
+  try{ const r = await appStorage.get('personas_nuevas'); personasNuevas = r ? JSON.parse(r.value) : {}; }catch(e){ personasNuevas = {}; }
 }
-async function guardarRegistros(){ try{ await window.storage.set('registros:'+todayKey(), JSON.stringify(registrosHoy)); }catch(e){} }
-async function guardarOverrides(){ try{ await window.storage.set('people_overrides', JSON.stringify(peopleOverrides)); }catch(e){} }
-async function guardarPersonasNuevas(){ try{ await window.storage.set('personas_nuevas', JSON.stringify(personasNuevas)); }catch(e){} }
+async function guardarRegistros(){ try{ await appStorage.set('registros:'+todayKey(), JSON.stringify(registrosHoy)); }catch(e){} }
+async function guardarOverrides(){ try{ await appStorage.set('people_overrides', JSON.stringify(peopleOverrides)); }catch(e){} }
+async function guardarPersonasNuevas(){ try{ await appStorage.set('personas_nuevas', JSON.stringify(personasNuevas)); }catch(e){} }
 
 async function getHistorialCuadro(cuadro){
-  try{ const r = await window.storage.get('historialCuadro:'+cuadro); return r ? JSON.parse(r.value) : []; }catch(e){ return []; }
+  try{ const r = await appStorage.get('historialCuadro:'+cuadro); return r ? JSON.parse(r.value) : []; }catch(e){ return []; }
 }
 async function addHistorialCuadro(cuadro, credencial){
   const hist = await getHistorialCuadro(cuadro);
-  if(!hist.includes(credencial)){ hist.push(credencial); try{ await window.storage.set('historialCuadro:'+cuadro, JSON.stringify(hist)); }catch(e){} }
+  if(!hist.includes(credencial)){ hist.push(credencial); try{ await appStorage.set('historialCuadro:'+cuadro, JSON.stringify(hist)); }catch(e){} }
 }
 function personaEfectiva(persona){
   if(!persona) return null;
@@ -1023,9 +1053,9 @@ document.getElementById('btnLimpiarHoy').addEventListener('click', async ()=>{
 // ===================== PENDIENTES DE VERIFICAR =====================
 let credencialesSinDatos = {}; // credencial(str) -> {credencial, primeraVezISO}
 async function cargarCredencialesSinDatos(){
-  try{ const r = await window.storage.get('credenciales_sin_datos'); credencialesSinDatos = r ? JSON.parse(r.value) : {}; }catch(e){ credencialesSinDatos = {}; }
+  try{ const r = await appStorage.get('credenciales_sin_datos'); credencialesSinDatos = r ? JSON.parse(r.value) : {}; }catch(e){ credencialesSinDatos = {}; }
 }
-async function guardarCredencialesSinDatos(){ try{ await window.storage.set('credenciales_sin_datos', JSON.stringify(credencialesSinDatos)); }catch(e){} }
+async function guardarCredencialesSinDatos(){ try{ await appStorage.set('credenciales_sin_datos', JSON.stringify(credencialesSinDatos)); }catch(e){} }
 function registrarCredencialPendienteSinDatos(codigo){
   const key = String(parseInt(codigo));
   if(!credencialesSinDatos[key]){
@@ -1178,9 +1208,9 @@ document.getElementById('btnProcesarEmpleados').addEventListener('click', async 
 // ===================== CARGA DE EXCEL: CUADROS =====================
 let cuadrosInfo = {}; // claveCuadro(str) -> {variedad, id}
 async function cargarCuadrosInfo(){
-  try{ const r = await window.storage.get('cuadros_info'); cuadrosInfo = r ? JSON.parse(r.value) : {}; }catch(e){ cuadrosInfo = {}; }
+  try{ const r = await appStorage.get('cuadros_info'); cuadrosInfo = r ? JSON.parse(r.value) : {}; }catch(e){ cuadrosInfo = {}; }
 }
-async function guardarCuadrosInfo(){ try{ await window.storage.set('cuadros_info', JSON.stringify(cuadrosInfo)); }catch(e){} }
+async function guardarCuadrosInfo(){ try{ await appStorage.set('cuadros_info', JSON.stringify(cuadrosInfo)); }catch(e){} }
 
 document.getElementById('btnProcesarCuadros').addEventListener('click', async ()=>{
   const fileInput = document.getElementById('fileCuadros');
