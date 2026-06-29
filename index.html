@@ -338,7 +338,9 @@
     <h3>No coincide con su actividad fija</h3>
     <p id="modalDiscrepNombre">—</p>
     <div class="diff-box" id="modalDiscrepDiff"></div>
-    <p>¿Este cambio es solo por hoy, o quieres que sea su nueva actividad fija de ahora en adelante?</p>
+    <p>¿Cómo quieres registrar este escaneo?</p>
+    <button class="btn btn-primary" id="btnUsarFija" style="margin-bottom:10px;">Usar su actividad fija (ignorar lo que puse arriba)</button>
+    <p style="margin:14px 0 8px; font-size:.82rem;">O bien, registrar el cambio que escaneaste:</p>
     <div class="row-btns">
       <button class="btn btn-ghost" id="btnSoloHoy">Solo por hoy</button>
       <button class="btn btn-sol" id="btnCambioDefinitivo">Cambio definitivo</button>
@@ -590,13 +592,17 @@ function abrirModalDiscrepancia(persona, actividadNueva, cuadroNueva, onResuelto
   discrepanciaCallback = onResuelto;
   document.getElementById('modalDiscrepancia').classList.add('show');
 }
+document.getElementById('btnUsarFija').addEventListener('click', ()=>{
+  document.getElementById('modalDiscrepancia').classList.remove('show');
+  if(discrepanciaCallback) discrepanciaCallback('usar_fija');
+});
 document.getElementById('btnSoloHoy').addEventListener('click', ()=>{
   document.getElementById('modalDiscrepancia').classList.remove('show');
-  if(discrepanciaCallback) discrepanciaCallback(false);
+  if(discrepanciaCallback) discrepanciaCallback('solo_hoy');
 });
 document.getElementById('btnCambioDefinitivo').addEventListener('click', ()=>{
   document.getElementById('modalDiscrepancia').classList.remove('show');
-  if(discrepanciaCallback) discrepanciaCallback(true);
+  if(discrepanciaCallback) discrepanciaCallback('definitivo');
 });
 async function aplicarCambioDefinitivo(persona, actividadNueva, cuadroNueva){
   const ov = Object.assign({}, peopleOverrides[String(persona.credencial)] || {});
@@ -759,7 +765,17 @@ async function procesarEscaneo(codigo){
   const val = validarRegistro(personaOriginal, actividadEsperada, cuadro);
 
   if(val.estado === 'warn'){
-    abrirModalDiscrepancia(persona, actividadEsperada, cuadro, async (esDefinitivo)=>{
+    abrirModalDiscrepancia(persona, actividadEsperada, cuadro, async (opcion)=>{
+      if(opcion === 'usar_fija'){
+        const actFija = persona.actividad_principal;
+        const cuadroFija = persona.regla==='celeste' ? persona.cuadro_principal : cuadro;
+        const registro = await crearRegistro(persona, actFija, cuadroFija,
+          {estado:'ok', motivo:'Registrado con su actividad fija del sistema (se ignoró lo indicado arriba).', regla:persona.regla});
+        mostrarResultado(persona, registro, null);
+        renderHistorial(); renderResumen();
+        return;
+      }
+      const esDefinitivo = opcion === 'definitivo';
       if(esDefinitivo){ await aplicarCambioDefinitivo(persona, actividadEsperada, cuadro); showToast('Actividad fija actualizada.'); }
       const registro = await crearRegistro(persona, actividadEsperada, cuadro,
         {estado:'ok', motivo: esDefinitivo ? 'Cambio definitivo aplicado.' : 'Registrado como excepción de hoy.', regla:persona.regla});
