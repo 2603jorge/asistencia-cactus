@@ -704,6 +704,36 @@ let asignarOrigenGestion=false;
 async function procesarEscaneo(codigo){
   const personaOriginal = buscarPersona(codigo);
   const box = document.getElementById('resultadoBox');
+  const credInt = parseInt(codigo);
+
+  // ── VERIFICACION DE DUPLICADO ──────────────────────────────────────────────
+  // Si ya existe un registro de hoy con esta credencial y el mismo cuadro activo,
+  // avisar al supervisor sin crear duplicado.
+  // Excepción: si la actividad o cuadro son distintos al registro previo, sí permitir.
+  const registroPrevio = registrosHoy.find(r =>
+    r.credencial === credInt &&
+    r.cuadro === cuadroActual
+  );
+  if(registroPrevio){
+    const actividadNueva = actividadManualActual != null
+      ? actividadManualActual
+      : (personaOriginal ? personaEfectiva(personaOriginal).actividad_principal : null);
+    const mismaActividad = actividadNueva === registroPrevio.actividad || actividadNueva === null;
+    if(mismaActividad){
+      const nombreMostrar = registroPrevio.nombre !== '(no identificado)' ? registroPrevio.nombre : `Credencial ${codigo}`;
+      box.innerHTML = `
+        <div class="result-box warn">
+          <div class="verdict">⚠ Ya registrada hoy</div>
+          <div class="name">${nombreMostrar}</div>
+          <div class="meta">Credencial ${codigo} · Registrada a las ${registroPrevio.hora}</div>
+          <div class="reason">Esta credencial ya fue escaneada hoy en el cuadro ${cuadroActual}. No se creó un duplicado.</div>
+        </div>`;
+      if(navigator.vibrate) navigator.vibrate([80,60,80]); // vibración doble para distinguir del OK
+      return;
+    }
+    // Si llegó aquí es porque la actividad cambió — se permite continuar normalmente
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   if(!personaOriginal){
     if(cuadroActual==null){ showToast('Indica el cuadro antes de escanear.'); return; }
