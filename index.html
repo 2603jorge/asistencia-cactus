@@ -397,8 +397,12 @@ function showToast(msg){
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2400);
 }
-function nombreCompleto(p){ return `${p.nombre} ${p.apellido_materno} ${p.apellido_paterno}`; }
-function descActividad(clave){ const a = ACTIVITIES_DATA.find(x=>x.clave===clave); return a ? a.descripcion : ('Clave '+clave); }
+function nombreCompleto(p){ return `${p.nombre} ${p.apellido_materno||''} ${p.apellido_paterno||''}`.replace(/\s+/g,' ').trim(); }
+function descActividad(clave){
+  if(clave===null || clave===undefined) return '(sin actividad especificada)';
+  const a = ACTIVITIES_DATA.find(x=>x.clave===clave);
+  return a ? a.descripcion : ('Clave '+clave);
+}
 function claveActividadPorNombre(nombre){
   const n = nombre.trim().toUpperCase();
   const a = ACTIVITIES_DATA.find(x=>x.descripcion.toUpperCase()===n);
@@ -696,8 +700,21 @@ async function procesarEscaneo(codigo){
   const box = document.getElementById('resultadoBox');
 
   if(!personaOriginal){
-    box.innerHTML = `<div class="result-box warn"><div class="verdict">⚠ Credencial nueva</div><div class="meta">Credencial ${codigo}</div><div class="reason">No está en el listado de personal. Puedes darla de alta ahora mismo.</div></div>`;
-    abrirModalAltaNueva(codigo);
+    if(cuadroActual==null){ showToast('Indica el cuadro antes de escanear.'); return; }
+    const actividadParaRegistro = actividadManualActual; // puede ser null si no se forzó ninguna
+    const registro = await crearRegistro(
+      {credencial: parseInt(codigo), nombre:'(no identificado)', apellido_materno:'', apellido_paterno:''},
+      actividadParaRegistro, cuadroActual,
+      {estado:'warn', motivo:'Esta credencial no está en el listado de personal. Se registró igual; complétala después en Gestión.', regla:null}
+    );
+    registrarCredencialPendienteSinDatos(codigo);
+    box.innerHTML = `
+      <div class="result-box warn">
+        <div class="verdict">⚠ No está en el listado</div>
+        <div class="meta">Credencial ${codigo} · ${registro.hora}</div>
+        <div class="reason">Se registró su asistencia de hoy. Complétala después en <b>Gestión</b> con su nombre y actividad fija.</div>
+      </div>`;
+    renderHistorial(); renderResumen();
     return;
   }
   const persona = personaEfectiva(personaOriginal);
@@ -866,8 +883,10 @@ function checkAltaNuevaReady(){
   const ready = actAltaSel && reglaAltaSel && (reglaAltaSel!=='celeste' || cuadroAltaSel);
   document.getElementById('btnGuardarAltaNueva').disabled = !ready;
 }
-function abrirModalAltaNueva(codigo){
+let altaNuevaDesdeGestion = false;
+function abrirModalAltaNueva(codigo, desdeGestion){
   pendingCredAlta = codigo;
+  altaNuevaDesdeGestion = !!desdeGestion;
   document.getElementById('modalAltaNuevaCred').textContent = 'Credencial '+codigo;
   document.getElementById('inputNombreAlta').value = '';
   inputActAltaNueva.value=''; inputCuadroAltaNueva.value='';
@@ -887,17 +906,27 @@ document.getElementById('btnGuardarAltaNueva').addEventListener('click', async (
     regla: reglaAltaSel, actividad_principal: actAltaSel, desc_principal: descActividad(actAltaSel),
     cuadro_principal: reglaAltaSel==='celeste' ? cuadroAltaSel : null,
     actividad_secundaria:null, desc_secundaria:null, cuadro_secundario:null,
-    pendiente_verificar: true,
-    observacion: 'Dado de alta en campo el '+todayKey()+'. No estaba en el sistema base; verificar datos y confirmar actividad asignada.'
+    pendiente_verificar: false, observacion: null
   };
   personasNuevas[String(nuevaPersona.credencial)] = nuevaPersona;
   await guardarPersonasNuevas();
+  // si esta credencial estaba marcada como "sin datos" (escaneada sin existir), se quita de esa lista
+  if(credencialesSinDatos[String(nuevaPersona.credencial)]){
+    delete credencialesSinDatos[String(nuevaPersona.credencial)];
+    await guardarCredencialesSinDatos();
+  }
   document.getElementById('modalAltaNueva').classList.remove('show');
-  showToast('Empleado nuevo dado de alta. Quedó marcado para verificar después.');
-  const registro = await crearRegistro(nuevaPersona, nuevaPersona.actividad_principal, cuadroActual,
-    {estado:'ok', motivo:'Empleado nuevo registrado en este momento. Pendiente de verificar.', regla:nuevaPersona.regla});
-  mostrarResultado(nuevaPersona, registro, null);
-  renderHistorial(); renderResumen();
+  showToast('Empleado completado con sus datos. Ya quedó listo para el próximo escaneo.');
+
+  if(altaNuevaDesdeGestion){
+    altaNuevaDesdeGestion = false;
+    renderPendientes();
+  } else {
+    const registro = await crearRegistro(nuevaPersona, nuevaPersona.actividad_principal, cuadroActual,
+      {estado:'ok', motivo:'Empleado nuevo registrado en este momento.', regla:nuevaPersona.regla});
+    mostrarResultado(nuevaPersona, registro, null);
+    renderHistorial(); renderResumen();
+  }
 });
 
 
@@ -946,13 +975,31 @@ document.getElementById('btnLimpiarHoy').addEventListener('click', async ()=>{
 });
 
 // ===================== PENDIENTES DE VERIFICAR =====================
+let credencialesSinDatos = {}; // credencial(str) -> {credencial, primeraVezISO}
+async function cargarCredencialesSinDatos(){
+  try{ const r = await window.storage.get('credenciales_sin_datos'); credencialesSinDatos = r ? JSON.parse(r.value) : {}; }catch(e){ credencialesSinDatos = {}; }
+}
+async function guardarCredencialesSinDatos(){ try{ await window.storage.set('credenciales_sin_datos', JSON.stringify(credencialesSinDatos)); }catch(e){} }
+function registrarCredencialPendienteSinDatos(codigo){
+  const key = String(parseInt(codigo));
+  if(!credencialesSinDatos[key]){
+    credencialesSinDatos[key] = {credencial: parseInt(codigo), primeraVezISO: new Date().toISOString()};
+    guardarCredencialesSinDatos();
+  }
+}
+
 function obtenerPendientes(){
   const lista = [];
-  // 1. personas nuevas dadas de alta en campo (siempre marcadas pendiente_verificar)
+  // 1. credenciales escaneadas que no existen en ningun lado (sin nombre ni datos todavia)
+  Object.values(credencialesSinDatos).forEach(c=>{
+    lista.push({credencial:c.credencial, nombre:'(no identificado)', apellido_materno:'', apellido_paterno:'',
+      origen:'Escaneada sin datos', observacion:'No se encontró en el sistema. Complétala con sus datos.', sinDatos:true});
+  });
+  // 2. personas nuevas dadas de alta en campo (siempre marcadas pendiente_verificar)
   Object.values(personasNuevas).forEach(p=>{
     if(p.pendiente_verificar) lista.push(Object.assign({}, p, {origen:'Alta en campo'}));
   });
-  // 2. personas del catalogo original que siguen sin actividad fija (sin_color) y nunca se les asigno nada
+  // 3. personas del catalogo original que siguen sin actividad fija (sin_color) y nunca se les asigno nada
   PEOPLE_DATA.forEach(p=>{
     const eff = personaEfectiva(p);
     if(eff.regla === 'sin_color' && !peopleOverrides[String(p.credencial)]){
@@ -967,16 +1014,20 @@ function renderPendientes(){
   const cont = document.getElementById('listaPendientes');
   if(pendientes.length===0){ cont.innerHTML = '<div class="row-empty">No hay pendientes por ahora.</div>'; return; }
   cont.innerHTML = pendientes.map(p=>`
-    <div class="stop-item" data-cred="${p.credencial}">
+    <div class="stop-item" data-cred="${p.credencial}" data-sindatos="${p.sinDatos?'1':'0'}">
       <div>
         <div class="ttl">${nombreCompleto(p)} · ${p.credencial}</div>
         <div class="meta">${p.origen}${p.observacion ? ' — '+p.observacion : ''}</div>
       </div>
-      <div class="count" style="background:var(--sol-500); color:var(--tierra-900);">Asignar</div>
+      <div class="count" style="background:var(--sol-500); color:var(--tierra-900);">${p.sinDatos ? 'Completar' : 'Asignar'}</div>
     </div>`).join('');
   cont.querySelectorAll('.stop-item').forEach(el=>{
     el.addEventListener('click', ()=>{
       const cred = el.dataset.cred;
+      if(el.dataset.sindatos === '1'){
+        abrirModalAltaNueva(cred, true);
+        return;
+      }
       const persona = buscarPersona(cred);
       pendingPersona = persona;
       asignarOrigenGestion = true;
@@ -1120,6 +1171,7 @@ document.getElementById('btnProcesarCuadros').addEventListener('click', async ()
 (async function init(){
   await cargarTodo();
   await cargarCuadrosInfo();
+  await cargarCredencialesSinDatos();
   refreshContext();
   renderHistorial();
   renderResumen();
